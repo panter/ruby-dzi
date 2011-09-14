@@ -3,7 +3,7 @@
 #
 # Ruby Dzi slices images and generates a dzi file that is compatible with DeepZoom or Seadragon
 #
-# Requirements: rmagick gem (tested with version 2.9.0)
+# Requirements: ImageMagick binaries installed (tested with ImageMagick 6.6.4-5)
 #
 # Contributor: Marc Vitalis <marc.vitalis@live.com> 
 #
@@ -17,12 +17,10 @@
 # License.
 #
 require 'rubygems'
-require 'fileutils'
-require 'RMagick'
+require 'tmpdir'
 require 'open-uri'
 
 class RubyDzi
-  include Magick
 
   attr_accessor :image_path, :name, :format, :output_ext, :quality, :dir, :tile_size, :overlap
 
@@ -46,41 +44,40 @@ class RubyDzi
     @levels_root_dir     = File.join(@dir, @name + '_files')
     @xml_descriptor_path = File.join(@dir, @name + '.' + @output_ext)
 
-    image = get_image(@image_path)
-    
-    image.strip! # remove meta information
-
-    orig_width, orig_height = image.columns, image.rows
+    orig_width, orig_height = dimensions(@image_path)
 
     remove_files!
+    Dir.mktmpdir do |tmp_dir|
 
-    # iterate over all levels (= zoom stages)
-    max_level(orig_width, orig_height).downto(0) do |level|
-      width, height = image.columns, image.rows
-      puts "level #{level} is #{width} x #{height}"
-      
-      current_level_dir = File.join(@levels_root_dir, level.to_s)
-      FileUtils.mkdir_p(current_level_dir)
-      
-      # iterate over columns
-      x, col_count = 0, 0
-      while x < width      
-        # iterate over rows
-        y, row_count = 0, 0
-        while y < height          
-          dest_path = File.join(current_level_dir, "#{col_count}_#{row_count}.#{@format}")
-          tile_width, tile_height = tile_dimensions(x, y, @tile_size, @overlap)
-          
-          save_cropped_image(image, dest_path, x, y, tile_width, tile_height, @quality)
-          
-          y += (tile_height - (2 * @overlap))
-          row_count += 1
+      work_path = create_working_copy(tmp_dir, @image_path)
+
+      # iterate over all levels (= zoom stages)
+      max_level(orig_width, orig_height).downto(0) do |level|
+        width, height = dimensions(work_path)
+        
+        current_level_dir = File.join(@levels_root_dir, level.to_s)
+        FileUtils.mkdir_p(current_level_dir)
+        
+        # iterate over columns
+        x, col_count = 0, 0
+        while x < width      
+          # iterate over rows
+          y, row_count = 0, 0
+          while y < height          
+            dest_path = File.join(current_level_dir, "#{col_count}_#{row_count}.#{@format}")
+            tile_width, tile_height = tile_dimensions(x, y, @tile_size, @overlap)
+            save_cropped_image(work_path, dest_path, x, y, tile_width, tile_height, @quality)
+            
+            y += (tile_height - (2 * @overlap))
+            row_count += 1
+          end
+          x += (tile_width - (2 * @overlap))
+          col_count += 1
         end
-        x += (tile_width - (2 * @overlap))
-        col_count += 1
+
+        work_path = halve(work_path)
       end
-      
-      image.resize!(0.5)
+
     end
 
     # generate xml descriptor and write file
@@ -117,19 +114,16 @@ protected
     return (Math.log([width, height].max) / Math.log(2)).ceil
   end
 
+  # creates one slice of the image
+  # TODO could this be solved more efficient? see
+  #      http://www.imagemagick.org/Usage/crop/#crop_tile
   def save_cropped_image(src, dest, x, y, width, height, quality = 75)
-    if src.is_a? Magick::Image
-      img = src
-    else
-      img = Magick::Image::read(src).first
-    end
-    
     quality = quality * 100 if quality < 1
 
     # The crop method retains the offset information in the cropped image.
     # To reset the offset data, adding true as the last argument to crop.
-    cropped = img.crop(x, y, width, height, true)
-    cropped.write(dest) { self.quality = quality }
+    cmd = "convert '#{src}' -quality #{quality} -crop #{width}x#{height}+#{x}+#{y} '#{dest}'"
+    execute cmd
   end
   
   
@@ -158,18 +152,37 @@ protected
     end
   end
 
-  def get_image(image_path)
-    image = nil
+  # copies image into tmp_dir and strips profiles
+  def create_working_copy(tmp_dir, path)
+    work_path = File.join(tmp_dir, File.basename(path))
+    cmd = "convert '#{path}[0]' -strip '#{work_path}'"
+    execute cmd
+    work_path
+  end
+  
+  # returns array of [cols rows]
+  def dimensions(path)
+    cmd = "identify -format '%w %h' '#{path}[0]'"
+    answer = execute(cmd)
+    parts = answer.split(/\s/)
+    parts.map { |p| p.to_i }
+  end
 
-    if File.file?(image_path)
-      image = Image::read(image_path).first
-    elsif valid_url?(image_path)
-      f = open(image_path)
-      image = Image.from_blob(f.read).first
-      f.close
+  # replaces the given image with one that is half the size
+  def halve(path)
+    cmd = "mogrify -resize '50%' '#{path}'"
+    answer = execute(cmd)
+    path
+  end
+
+  def execute(cmd)
+    # puts "#{cmd}"
+    answer = `#{cmd}`
+    if $?.to_i == 0
+      return answer
+    else
+      raise "Could not run [#{cmd}]. Returncode was: #{$?}"
     end
-
-    return image
   end
 
 end

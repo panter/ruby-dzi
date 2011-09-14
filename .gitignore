@@ -1,10 +1,13 @@
 Manifest
 *.gem
 *.gemspec
+*.rvmrc
 *.log
 .tmp*
 *.jpg
 *.xml
 *.dzi
 *_files
+*.swp
+*.swo
 pkg
