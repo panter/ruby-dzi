@@ -5,7 +5,9 @@
 #
 # Requirements: ImageMagick binaries installed (tested with ImageMagick 6.6.4-5)
 #
-# Contributor: Marc Vitalis <marc.vitalis@live.com> 
+# Plain magick implementation: Panter llc (http://www.panter.ch)
+#
+# Forked from: Marc Vitalis <marc.vitalis@live.com> 
 #
 # Original Author:: MESO Web Scapes (www.meso.net)
 # By:: Sascha Hanssen <hanssen@meso.net>
@@ -22,15 +24,14 @@ require 'open-uri'
 
 class RubyDzi
 
-  attr_accessor :image_path, :name, :format, :output_ext, :quality, :dir, :tile_size, :overlap
+  attr_accessor :image_path, :name, :format, :output_ext, :quality, :dir, :tile_size
 
   def initialize(image_path)
 
     #set defaults
     @quality = 75
     @dir = '.'
-    @tile_size = 254
-    @overlap = 1
+    @tile_size = 256
     @output_ext = 'dzi'
 
     @image_path = image_path
@@ -51,30 +52,11 @@ class RubyDzi
 
       work_path = create_working_copy(tmp_dir, @image_path)
 
-      # iterate over all levels (= zoom stages)
+      # iterate over all levels (= zoom stages) and create slices
       max_level(orig_width, orig_height).downto(0) do |level|
-        width, height = dimensions(work_path)
-        
         current_level_dir = File.join(@levels_root_dir, level.to_s)
         FileUtils.mkdir_p(current_level_dir)
-        
-        # iterate over columns
-        x, col_count = 0, 0
-        while x < width      
-          # iterate over rows
-          y, row_count = 0, 0
-          while y < height          
-            dest_path = File.join(current_level_dir, "#{col_count}_#{row_count}.#{@format}")
-            tile_width, tile_height = tile_dimensions(x, y, @tile_size, @overlap)
-            save_cropped_image(work_path, dest_path, x, y, tile_width, tile_height, @quality)
-            
-            y += (tile_height - (2 * @overlap))
-            row_count += 1
-          end
-          x += (tile_width - (2 * @overlap))
-          col_count += 1
-        end
-
+        slice_image(work_path, current_level_dir, format, tile_size)
         work_path = halve(work_path)
       end
 
@@ -83,7 +65,6 @@ class RubyDzi
     # generate xml descriptor and write file
     write_xml_descriptor(@xml_descriptor_path,
                          :tile_size => @tile_size,
-                         :overlap   => @overlap,
                          :format    => @format,
                          :width     => orig_width,
                          :height    => orig_height)
@@ -100,38 +81,15 @@ class RubyDzi
 
 protected
 
-  def tile_dimensions(x, y, tile_size, overlap)
-    overlapping_tile_size = tile_size + (2 * overlap)
-    border_tile_size      = tile_size + overlap
-    
-    tile_width  = (x > 0) ? overlapping_tile_size : border_tile_size
-    tile_height = (y > 0) ? overlapping_tile_size : border_tile_size
-    
-    return tile_width, tile_height
-  end
-
   def max_level(width, height)
     return (Math.log([width, height].max) / Math.log(2)).ceil
   end
 
-  # creates one slice of the image
-  # TODO could this be solved more efficient? see
-  #      http://www.imagemagick.org/Usage/crop/#crop_tile
-  def save_cropped_image(src, dest, x, y, width, height, quality = 75)
-    quality = quality * 100 if quality < 1
-
-    # The crop method retains the offset information in the cropped image.
-    # To reset the offset data, adding true as the last argument to crop.
-    cmd = "convert '#{src}' -quality #{quality} -crop #{width}x#{height}+#{x}+#{y} '#{dest}'"
-    execute cmd
-  end
-  
-  
   def write_xml_descriptor(path, attr)
     attr = { :xmlns => 'http://schemas.microsoft.com/deepzoom/2008' }.merge attr
     
     xml = "<?xml version='1.0' encoding='UTF-8'?>" + 
-          "<Image TileSize='#{attr[:tile_size]}' Overlap='#{attr[:overlap]}' " + 
+          "<Image TileSize='#{attr[:tile_size]}' Overlap='0' " + 
             "Format='#{attr[:format]}' xmlns='#{attr[:xmlns]}'>" + 
           "<Size Width='#{attr[:width]}' Height='#{attr[:height]}'/>" + 
           "</Image>"
@@ -173,6 +131,19 @@ protected
     cmd = "mogrify -resize '50%' '#{path}'"
     answer = execute(cmd)
     path
+  end
+
+
+  # use magick to slice the image given by workpath into tiles
+  # the filenames are generated according to the deepzoom spec using magick's
+  # fx calculations.
+  # this is more or less the example given at
+  # http://www.imagemagick.org/Usage/crop/#crop_tile
+  def slice_image(work_path, current_level_dir, format, tile_size)
+    cmd = "convert #{work_path} +repage +gravity -crop #{tile_size}x#{tile_size} " +
+          "-set 'filename:tile' '%[fx:page.x/#{tile_size}]_%[fx:page.y/#{tile_size}]' " +
+          File.join(current_level_dir, "%[filename:tile].#{format}")
+    execute cmd
   end
 
   def execute(cmd)

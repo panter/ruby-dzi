@@ -1,14 +1,21 @@
 = Ruby Dzi Generator
+
 A forked project of Deep Zoom Slicer
 
 Ruby Dzi slices images into several tiles and creates dzi descriptor file.
 Sliced images are compatible for use with OpenZoom, Deep Zoom and Seadragon.
 
+This implementation uses plain command line image magick which makes it more
+stable, easier to debug and faster (imho).
+
 == Additional Information
 
-Fork Contributor: Marc Vitalis <marc.vitalis@live.com>
+Forked from:
 
-Fork from::
+Marc Vitalis <marc.vitalis@live.com>
+https://github.com/netxph/ruby-dzi
+
+Origial implementation:
 
 Deep Zoom Slicer
 Copyright (c) 2009, MESO Web Scapes, Sascha Hanssen (hanssen@meso.net)
