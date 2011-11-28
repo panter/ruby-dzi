@@ -25,17 +25,18 @@ require 'open-uri'
 class RubyDzi
 
   attr_accessor :image_path, :name, :format, :output_ext, :quality, :dir,
-                :tile_size, :strip, :profile_path
+                :tile_size, :strip, :profile_path, :filter
 
   def initialize(image_path)
 
     #set defaults
-    @quality = 75
+    @quality = 98
     @dir = '.'
     @tile_size = 256
     @output_ext = 'dzi'
     @profile_path = nil
     @strip = true
+    @filter = nil
 
     @image_path = image_path
 
@@ -117,9 +118,11 @@ protected
   def create_working_copy(tmp_dir, path)
     work_path = File.join(tmp_dir, File.basename(path))
     cmd = ['convert']
+    cmd << "-filter #{@filter}" if @filter
     cmd << "'#{path}[0]'"
     cmd << '-strip' if @strip
     cmd << "-profile '#{@profile_path}'" if @profile_path
+    cmd << "-quality #{@quality}" if @quality
     cmd << "'#{work_path}'"
     execute cmd.join(' ')
     work_path
