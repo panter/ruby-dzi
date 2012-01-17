@@ -27,6 +27,10 @@ class RubyDzi
   attr_accessor :image_path, :name, :format, :output_ext, :quality, :dir,
                 :tile_size, :strip, :profile_path, :filter
 
+  # when processing really big images, we may hit the maximum height / width of
+  # some formats. thus we use png as intermediate format
+  WORKING_COPY_FORMAT = 'png'
+
   def initialize(image_path)
 
     #set defaults
@@ -42,9 +46,8 @@ class RubyDzi
 
   end
 
-  def generate!(name, format = 'jpg')
+  def generate!(name)
     @name = name
-    @format = format
     
     @levels_root_dir     = File.join(@dir, @name + '_files')
     @xml_descriptor_path = File.join(@dir, @name + '.' + @output_ext)
@@ -60,7 +63,7 @@ class RubyDzi
       max_level(orig_width, orig_height).downto(0) do |level|
         current_level_dir = File.join(@levels_root_dir, level.to_s)
         FileUtils.mkdir_p(current_level_dir)
-        slice_image(work_path, current_level_dir, format, tile_size)
+        slice_image(work_path, current_level_dir, @format, tile_size)
         work_path = halve(work_path)
       end
 
@@ -116,7 +119,7 @@ protected
 
   # copies image into tmp_dir and applies profiles
   def create_working_copy(tmp_dir, path)
-    work_path = File.join(tmp_dir, File.basename(path))
+    work_path = File.join(tmp_dir, File.basename(path))+'.'+WORKING_COPY_FORMAT
     cmd = ['convert']
     cmd << "-filter #{@filter}" if @filter
     cmd << "'#{path}[0]'"
@@ -150,7 +153,7 @@ protected
   # this is more or less the example given at
   # http://www.imagemagick.org/Usage/crop/#crop_tile
   def slice_image(work_path, current_level_dir, format, tile_size)
-    cmd = "convert #{work_path} +repage +gravity -crop #{tile_size}x#{tile_size} " +
+    cmd = "convert '#{work_path}' +repage +gravity -strip -crop #{tile_size}x#{tile_size} " +
           "-set 'filename:tile' '%[fx:page.x/#{tile_size}]_%[fx:page.y/#{tile_size}]' " +
           File.join(current_level_dir, "%[filename:tile].#{format}")
     execute cmd
